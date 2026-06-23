@@ -130,6 +130,15 @@ class EmailSender:
             <div class="summary">
                 <h2>📊 Summary</h2>
                 <p><strong>Total Jobs Found:</strong> {summary['total_jobs']}</p>
+                
+                <p><strong>Jobs by Source:</strong></p>
+                <ul>
+            """
+            for source, count in summary.get('by_source', {}).items():
+                html += f"<li>{source}: {count} jobs</li>"
+            html += """
+                </ul>
+                
                 <p><strong>Jobs by Location:</strong></p>
                 <ul>
             """
@@ -174,7 +183,12 @@ class EmailSender:
                     <div class="job-details">💼 Experience: {job.get('experience', 'N/A')}</div>
                     <div class="job-details">💰 Salary: {job.get('salary', 'Not disclosed')}</div>
                     <div class="job-details">🌐 Source: {job.get('source', 'N/A')}</div>
+                    <div class="job-details">📅 Posted: {job.get('posted_date', 'Recently')}</div>
                 """
+                
+                # Show job description if available
+                if job.get('description'):
+                    html += f'<div class="job-details" style="margin-top: 10px; font-style: italic;">{job["description"]}</div>'
                 
                 if was_applied:
                     html += '<div class="job-details" style="color: #27ae60; font-weight: bold;">✓ Application Submitted</div>'
