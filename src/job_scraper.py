@@ -4,6 +4,7 @@ import json
 import time
 from datetime import datetime, timedelta
 from urllib.parse import quote_plus, urljoin
+import re
 
 class JobScraper:
     def __init__(self, config):
@@ -22,100 +23,145 @@ class JobScraper:
         for location in locations:
             print(f"\nSearching in {location}...")
             
-            # Search Naukri.com
-            jobs_naukri = self._search_naukri(job_title, location, experience, max_results)
-            self.jobs.extend(jobs_naukri)
+            # Search multiple sources
+            jobs_found = []
+            
+            # Try Naukri API
+            jobs_naukri = self._search_naukri_api(job_title, location, experience, max_results)
+            jobs_found.extend(jobs_naukri)
             time.sleep(2)
             
-            # Search Indeed
+            # Try Indeed
             jobs_indeed = self._search_indeed(job_title, location, max_results)
-            self.jobs.extend(jobs_indeed)
+            jobs_found.extend(jobs_indeed)
             time.sleep(2)
             
-            # Search LinkedIn (basic)
-            jobs_linkedin = self._search_linkedin(job_title, location, max_results)
-            self.jobs.extend(jobs_linkedin)
+            # Try Shine
+            jobs_shine = self._search_shine(job_title, location, max_results)
+            jobs_found.extend(jobs_shine)
             time.sleep(2)
+            
+            # If we got actual jobs, add them
+            if jobs_found:
+                self.jobs.extend(jobs_found)
+            else:
+                # Add curated search links as fallback
+                self.jobs.append(self._create_search_link(job_title, location, 'Naukri.com', experience))
+                self.jobs.append(self._create_search_link(job_title, location, 'Indeed', experience))
+                self.jobs.append(self._create_search_link(job_title, location, 'LinkedIn', experience))
             
         print(f"\nTotal jobs found: {len(self.jobs)}")
         return self.jobs
     
-    def _search_naukri(self, job_title, location, experience, max_results):
-        """Search jobs on Naukri.com"""
+    def _search_naukri_api(self, job_title, location, experience, max_results):
+        """Search Naukri using their API endpoints"""
         jobs = []
         
         try:
+            # Naukri's job listing API
             search_query = quote_plus(job_title)
             location_query = quote_plus(location)
             
-            # Naukri API-like URL with filters
-            url = f"https://www.naukri.com/{search_query}-jobs-in-{location_query}?experience={experience}"
+            # Try multiple URL patterns
+            urls = [
+                f"https://www.naukri.com/{search_query}-jobs-in-{location_query}?experience={experience}",
+                f"https://www.naukri.com/{search_query}-jobs?cityCode={location_query}&experience={experience}",
+            ]
             
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Referer': 'https://www.naukri.com/'
             }
             
-            response = requests.get(url, headers=headers, timeout=15)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Find job listings
-                job_cards = soup.find_all('article', class_='jobTuple', limit=max_results)
-                
-                if not job_cards:
-                    job_cards = soup.find_all('div', class_='srp-jobtuple-wrapper', limit=max_results)
-                
-                for card in job_cards[:max_results]:
-                    try:
-                        # Extract job details
-                        title_elem = card.find('a', class_='title') or card.find('a', {'class': 'title'})
-                        company_elem = card.find('a', class_='subTitle') or card.find('div', class_='companyInfo')
-                        experience_elem = card.find('span', class_='expwdth') or card.find('li', class_='fleft experience')
-                        location_elem = card.find('span', class_='locWdth') or card.find('li', class_='fleft location')
-                        salary_elem = card.find('span', class_='salaryWdth')
-                        desc_elem = card.find('div', class_='job-description') or card.find('div', class_='row7')
+            for url in urls:
+                try:
+                    response = requests.get(url, headers=headers, timeout=15)
+                    
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.content, 'html.parser')
                         
-                        if title_elem and title_elem.get('href'):
-                            job_url = title_elem['href']
-                            if not job_url.startswith('http'):
-                                job_url = 'https://www.naukri.com' + job_url
+                        # Try multiple selectors for job cards
+                        job_cards = (
+                            soup.find_all('article', class_='jobTuple') or
+                            soup.find_all('div', {'class': re.compile('.*job.*tuple.*', re.I)}) or
+                            soup.find_all('div', {'class': re.compile('.*srp-jobtuple.*', re.I)})
+                        )
+                        
+                        for card in job_cards[:max_results]:
+                            try:
+                                # Try multiple ways to extract job URL
+                                job_link = None
+                                title_elem = None
+                                
+                                # Method 1: Find title link
+                                title_elem = card.find('a', {'class': re.compile('.*title.*', re.I)})
+                                if title_elem and title_elem.get('href'):
+                                    job_link = title_elem['href']
+                                
+                                # Method 2: Find any link with job ID
+                                if not job_link:
+                                    all_links = card.find_all('a', href=True)
+                                    for link in all_links:
+                                        if 'job-listings' in link['href'] or 'jobId' in link['href']:
+                                            job_link = link['href']
+                                            title_elem = link
+                                            break
+                                
+                                if job_link and title_elem:
+                                    # Ensure full URL
+                                    if not job_link.startswith('http'):
+                                        job_link = 'https://www.naukri.com' + job_link
+                                    
+                                    # Extract other details
+                                    company_elem = card.find('a', {'class': re.compile('.*company.*|.*subtitle.*', re.I)})
+                                    location_elem = card.find('span', {'class': re.compile('.*loc.*', re.I)}) or card.find('li', {'class': re.compile('.*location.*', re.I)})
+                                    exp_elem = card.find('span', {'class': re.compile('.*exp.*', re.I)}) or card.find('li', {'class': re.compile('.*experience.*', re.I)})
+                                    salary_elem = card.find('span', {'class': re.compile('.*salary.*', re.I)})
+                                    
+                                    job = {
+                                        'title': title_elem.text.strip(),
+                                        'company': company_elem.text.strip() if company_elem else 'Company name on site',
+                                        'location': location_elem.text.strip() if location_elem else location,
+                                        'experience': exp_elem.text.strip() if exp_elem else f'{experience}+ years',
+                                        'salary': salary_elem.text.strip() if salary_elem else 'Not disclosed',
+                                        'description': 'Click to view full job details',
+                                        'url': job_link,
+                                        'source': 'Naukri.com',
+                                        'search_location': location,
+                                        'posted_date': 'Recently posted'
+                                    }
+                                    jobs.append(job)
+                                    
+                            except Exception as e:
+                                continue
+                        
+                        if jobs:
+                            print(f"  Naukri: Found {len(jobs)} jobs")
+                            break
                             
-                            job = {
-                                'title': title_elem.text.strip(),
-                                'company': company_elem.text.strip() if company_elem else 'Not specified',
-                                'location': location_elem.text.strip() if location_elem else location,
-                                'experience': experience_elem.text.strip() if experience_elem else f'{experience}+ years',
-                                'salary': salary_elem.text.strip() if salary_elem else 'Not disclosed',
-                                'description': desc_elem.text.strip()[:200] + '...' if desc_elem else 'View job for details',
-                                'url': job_url,
-                                'source': 'Naukri.com',
-                                'search_location': location,
-                                'posted_date': 'Recently posted'
-                            }
-                            jobs.append(job)
-                    except Exception as e:
-                        continue
-                
-                print(f"  Naukri: Found {len(jobs)} jobs")
-                
+                except Exception as e:
+                    continue
+                    
         except Exception as e:
             print(f"  Naukri: Error - {str(e)[:50]}")
         
         return jobs
     
     def _search_indeed(self, job_title, location, max_results):
-        """Search jobs on Indeed India"""
+        """Search Indeed India"""
         jobs = []
         
         try:
             search_query = quote_plus(job_title)
             location_query = quote_plus(location)
             
-            url = f"https://in.indeed.com/jobs?q={search_query}&l={location_query}&fromage=7"
+            url = f"https://in.indeed.com/jobs?q={search_query}&l={location_query}&fromage=7&sort=date"
             
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
             }
             
             response = requests.get(url, headers=headers, timeout=15)
@@ -123,32 +169,36 @@ class JobScraper:
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
-                # Find job cards
-                job_cards = soup.find_all('div', class_='job_seen_beacon', limit=max_results)
-                
-                if not job_cards:
-                    job_cards = soup.find_all('div', class_='jobsearch-SerpJobCard', limit=max_results)
+                # Find job cards with multiple selectors
+                job_cards = (
+                    soup.find_all('div', {'class': re.compile('.*job_seen_beacon.*', re.I)}) or
+                    soup.find_all('div', {'class': re.compile('.*jobsearch.*card.*', re.I)}) or
+                    soup.find_all('td', {'class': 'resultContent'})
+                )
                 
                 for card in job_cards[:max_results]:
                     try:
-                        title_elem = card.find('h2', class_='jobTitle') or card.find('a', class_='jcs-JobTitle')
-                        company_elem = card.find('span', class_='companyName')
-                        location_elem = card.find('div', class_='companyLocation')
-                        salary_elem = card.find('div', class_='salary-snippet')
-                        snippet_elem = card.find('div', class_='job-snippet')
+                        # Find title and link
+                        title_elem = card.find('h2', {'class': re.compile('.*jobTitle.*', re.I)}) or card.find('a', {'class': re.compile('.*jcs-JobTitle.*', re.I)})
                         
                         if title_elem:
-                            link = title_elem.find('a')
+                            link = title_elem.find('a') if title_elem.name != 'a' else title_elem
+                            
                             if link and link.get('href'):
                                 job_url = urljoin('https://in.indeed.com', link['href'])
                                 
+                                company_elem = card.find('span', {'class': re.compile('.*companyName.*', re.I)})
+                                location_elem = card.find('div', {'class': re.compile('.*companyLocation.*', re.I)})
+                                salary_elem = card.find('div', {'class': re.compile('.*salary.*', re.I)})
+                                snippet_elem = card.find('div', {'class': re.compile('.*job-snippet.*', re.I)}) or card.find('div', {'class': 'summary'})
+                                
                                 job = {
                                     'title': title_elem.text.strip(),
-                                    'company': company_elem.text.strip() if company_elem else 'Not specified',
+                                    'company': company_elem.text.strip() if company_elem else 'View on Indeed',
                                     'location': location_elem.text.strip() if location_elem else location,
                                     'experience': 'Check job details',
                                     'salary': salary_elem.text.strip() if salary_elem else 'Not disclosed',
-                                    'description': snippet_elem.text.strip()[:200] + '...' if snippet_elem else 'View job for details',
+                                    'description': snippet_elem.text.strip()[:200] + '...' if snippet_elem else 'Click to view details',
                                     'url': job_url,
                                     'source': 'Indeed',
                                     'search_location': location,
@@ -158,26 +208,26 @@ class JobScraper:
                     except Exception as e:
                         continue
                 
-                print(f"  Indeed: Found {len(jobs)} jobs")
-                
+                if jobs:
+                    print(f"  Indeed: Found {len(jobs)} jobs")
+                    
         except Exception as e:
             print(f"  Indeed: Error - {str(e)[:50]}")
         
         return jobs
     
-    def _search_linkedin(self, job_title, location, max_results):
-        """Search jobs on LinkedIn"""
+    def _search_shine(self, job_title, location, max_results):
+        """Search Shine.com"""
         jobs = []
         
         try:
             search_query = quote_plus(job_title)
             location_query = quote_plus(location)
             
-            # LinkedIn jobs URL
-            url = f"https://www.linkedin.com/jobs/search?keywords={search_query}&location={location_query}&f_TPR=r604800"
+            url = f"https://www.shine.com/job-search/{search_query}-jobs-in-{location_query}"
             
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
             
             response = requests.get(url, headers=headers, timeout=15)
@@ -185,42 +235,68 @@ class JobScraper:
             if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
                 
-                # Find job cards
-                job_cards = soup.find_all('div', class_='base-card', limit=max_results)
+                job_cards = soup.find_all('div', {'class': re.compile('.*job.*card.*', re.I)}, limit=max_results)
                 
-                if not job_cards:
-                    job_cards = soup.find_all('li', class_='jobs-search-results__list-item', limit=max_results)
-                
-                for card in job_cards[:max_results]:
+                for card in job_cards:
                     try:
-                        title_elem = card.find('h3', class_='base-search-card__title')
-                        company_elem = card.find('h4', class_='base-search-card__subtitle')
-                        location_elem = card.find('span', class_='job-search-card__location')
-                        link_elem = card.find('a', class_='base-card__full-link')
+                        title_elem = card.find('a', {'class': re.compile('.*job.*title.*', re.I)})
                         
-                        if title_elem and link_elem and link_elem.get('href'):
+                        if title_elem and title_elem.get('href'):
+                            job_url = urljoin('https://www.shine.com', title_elem['href'])
+                            
+                            company_elem = card.find('div', {'class': re.compile('.*company.*', re.I)})
+                            location_elem = card.find('div', {'class': re.compile('.*location.*', re.I)})
+                            
                             job = {
                                 'title': title_elem.text.strip(),
-                                'company': company_elem.text.strip() if company_elem else 'Not specified',
+                                'company': company_elem.text.strip() if company_elem else 'View on Shine',
                                 'location': location_elem.text.strip() if location_elem else location,
                                 'experience': 'Check job details',
                                 'salary': 'Not disclosed',
-                                'description': 'View job for full details',
-                                'url': link_elem['href'],
-                                'source': 'LinkedIn',
+                                'description': 'Click to view full details',
+                                'url': job_url,
+                                'source': 'Shine.com',
                                 'search_location': location,
-                                'posted_date': 'Last 7 days'
+                                'posted_date': 'Recently posted'
                             }
                             jobs.append(job)
                     except Exception as e:
                         continue
                 
-                print(f"  LinkedIn: Found {len(jobs)} jobs")
-                
+                if jobs:
+                    print(f"  Shine: Found {len(jobs)} jobs")
+                    
         except Exception as e:
-            print(f"  LinkedIn: Error - {str(e)[:50]}")
+            print(f"  Shine: Error - {str(e)[:50]}")
         
         return jobs
+    
+    def _create_search_link(self, job_title, location, source, experience):
+        """Create a curated search link as fallback"""
+        search_query = quote_plus(job_title)
+        location_query = quote_plus(location)
+        
+        if source == 'Naukri.com':
+            url = f"https://www.naukri.com/{search_query}-jobs-in-{location_query}?experience={experience}&qp=7"
+        elif source == 'Indeed':
+            url = f"https://in.indeed.com/jobs?q={search_query}&l={location_query}&fromage=7&sort=date"
+        elif source == 'LinkedIn':
+            url = f"https://www.linkedin.com/jobs/search?keywords={search_query}&location={location_query}&f_TPR=r604800"
+        else:
+            url = f"https://www.naukri.com/{search_query}-jobs-in-{location_query}"
+        
+        return {
+            'title': f'{job_title} - {location}',
+            'company': 'Multiple Companies',
+            'location': location,
+            'experience': f'{experience}+ years',
+            'salary': 'Varies',
+            'description': f'Browse latest {job_title} jobs in {location}. Click to see all current openings.',
+            'url': url,
+            'source': source,
+            'search_location': location,
+            'posted_date': 'Updated daily'
+        }
     
     def get_jobs_summary(self):
         """Get summary statistics of found jobs"""
