@@ -1,0 +1,24 @@
+Dear Hiring Manager,
+
+I am writing to express my strong interest in the Java Developer position at your esteemed organization.
+
+With 5 years of professional experience in Java development, I have developed comprehensive expertise in:
+- Core Java, J2EE, and Spring Framework
+- Spring Boot and Microservices Architecture
+- RESTful API design and development
+- Database design with MySQL, PostgreSQL, and MongoDB
+- Agile/Scrum methodologies
+- Version control with Git
+
+Throughout my career, I have successfully delivered multiple enterprise-level applications, focusing on scalable and maintainable code. I am passionate about writing clean code, following best practices, and continuously learning new technologies.
+
+I am particularly interested in opportunities in Ahmedabad, Gandhinagar, Pune, or Mumbai, and I am excited about the possibility of contributing to your team's success.
+
+I am available for an interview at your convenience and can join with a notice period of 30 days.
+
+Thank you for considering my application. I look forward to discussing how my skills and experience align with your requirements.
+
+Best regards,
+[Your Name]
+[Your Email]
+[Your Phone]

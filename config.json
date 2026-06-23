@@ -1,0 +1,45 @@
+{
+  "job_search": {
+    "job_title": "Java Developer",
+    "experience_years": 5,
+    "locations": [
+      "Ahmedabad",
+      "Gandhinagar",
+      "Pune",
+      "Mumbai"
+    ],
+    "keywords": [
+      "Java",
+      "Spring Boot",
+      "Microservices",
+      "REST API",
+      "J2EE"
+    ],
+    "max_results_per_location": 10
+  },
+  "auto_apply": {
+    "enabled": true,
+    "max_applications_per_run": 5,
+    "resume_path": "resume/resume.pdf",
+    "cover_letter_template": "resume/cover_letter.txt",
+    "personal_info": {
+      "full_name": "Jaydeep Shah",
+      "email": "jaydeepshah121@gmail.com",
+      "phone": "+91-9106637056",
+      "current_location": "Gandhinagar",
+      "linkedin_url": "https://linkedin.com/in/jaydeep-shah-0203JD",
+      "notice_period": "30 days",
+      "expected_salary": "As per industry standards"
+    },
+    "preferences": {
+      "work_mode": ["Remote", "Hybrid", "On-site"],
+      "job_type": ["Full-time", "Contract"],
+      "skip_companies": ["TCS", "Tata Consultancy Services", "UFFIZIO", "IBM", "International Business Machines"]
+    }
+  },
+  "email": {
+    "subject": "Weekly Java Developer Job Report - {date}",
+    "include_summary": true,
+    "include_application_status": true
+  }
+}
